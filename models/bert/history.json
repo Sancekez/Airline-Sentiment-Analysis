@@ -1,0 +1,24 @@
+{
+  "train_loss": [
+    1.1690321883186698
+  ],
+  "val_loss": [
+    0.19859931952711465
+  ],
+  "val_metrics": [
+    {
+      "sentiment": {
+        "accuracy": 1.0,
+        "f1_macro": 1.0
+      },
+      "category": {
+        "accuracy": 0.9726027397260274,
+        "f1_macro": 0.969088991553767
+      },
+      "criticality": {
+        "accuracy": 0.9735159817351599,
+        "f1_macro": 0.6562835660580021
+      }
+    }
+  ]
+}

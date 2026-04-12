@@ -1,0 +1,30 @@
+{
+  "baseline": {
+    "sentiment": {
+      "accuracy": 1.0,
+      "f1_macro": 1.0
+    },
+    "category": {
+      "accuracy": 0.9767,
+      "f1_macro": 0.9749
+    },
+    "criticality": {
+      "accuracy": 0.9986,
+      "f1_macro": 0.9891
+    }
+  },
+  "bert": {
+    "sentiment": {
+      "accuracy": 1.0,
+      "f1_macro": 1.0
+    },
+    "category": {
+      "accuracy": 0.9982,
+      "f1_macro": 0.9978
+    },
+    "criticality": {
+      "accuracy": 0.9991,
+      "f1_macro": 0.9924
+    }
+  }
+}

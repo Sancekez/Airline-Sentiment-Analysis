@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ML artifacts
+models/*.pt
+models/*.bin
+models/*.h5
+models/*.pkl
+models/*.joblib
+!models/.gitkeep
+
+# Data (large files)
+data/*.csv
+data/*.tsv
+data/*.json
+data/raw/
+!data/.gitkeep
+
+# Reports
+reports/*.pdf
+!reports/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+*.log
+
+# Weights & Biases
+wandb/
