@@ -22,12 +22,11 @@
 |-----------|------------|--------|
 | Язык | Python | 3.11 |
 | ОС | Ubuntu 24.04 LTS | — |
-| ML Framework | scikit-learn | 1.3+ |
-| DL Framework | PyTorch + Transformers | 2.0+ / 4.35+ |
+| ML Framework | scikit-learn | 1.6.1 |
+| DL Framework | PyTorch + Transformers | 2.6.0 / 4.51.3 |
 | NLP модель | DistilBERT (distilbert-base-uncased) | — |
-| API | FastAPI + Uvicorn | 0.104+ |
-| Тестирование | pytest | 7.4+ |
-| GPU (обучение) | Google Colab Free (NVIDIA T4, 16 GB) | — |
+| API | FastAPI + Uvicorn | 0.115.12 / 0.34.2 |
+| Тестирование | pytest | 8.3.5 |
 
 ## 3. Архитектура системы
 
@@ -38,24 +37,27 @@
               - lowercase      TF-IDF + LogReg    DistilBERT
               - remove @       (baseline)         (fine-tuned)
               - remove URLs         │                   │
-              - normalize      3 пайплайна        Multi-Task Head
-                              (sent/cat/crit)    (sent + cat + crit)
+              - negation       3 пайплайна        Multi-Task Head
+                handling      (sent/cat/crit)    (sent + cat + crit)
 ```
 
 ### 3.1 Baseline модель
-- TF-IDF векторизация (max_features=10000, ngram_range=(1,2))
-- LogisticRegression (class_weight="balanced")
+- TF-IDF векторизация (max_features=10000, ngram_range=(1,2), sublinear_tf=True)
+- LogisticRegression (class_weight="balanced", solver="lbfgs", C=1.0)
 - 3 независимых пайплайна для каждой задачи
+- Обработка отрицаний: "no delays" → "no_delays" (единый токен)
 
 ### 3.2 DistilBERT модель
-- Предобученная модель distilbert-base-uncased
+- Предобученная модель distilbert-base-uncased (66M параметров)
 - Multi-task архитектура: общий энкодер + 3 классификационные головы
-- Focal Loss для борьбы с дисбалансом классов
-- AdamW оптимизатор, lr=2e-5, warmup 10%
+- Каждая голова: Linear(768→256) → ReLU → Dropout(0.3) → Linear(256→N_classes)
+- Focal Loss для борьбы с дисбалансом классов (γ=2)
+- AdamW оптимизатор, lr=2e-5, weight_decay=0.01, warmup 10%
+- Gradient clipping: max_norm=1.0
 
 ## 4. Данные
 
-**Датасет:** Синтетический корпус на основе реальных паттернов отзывов авиапассажиров (14 600 записей)
+**Датасет:** Синтетический корпус на основе реальных паттернов отзывов авиапассажиров
 
 | Параметр | Значение |
 |----------|----------|
@@ -63,43 +65,88 @@
 | Negative | 6 400 (43.8%) |
 | Positive | 4 200 (28.8%) |
 | Neutral | 4 000 (27.4%) |
-| Train / Val / Test | 70% / 15% / 15% |
+| Train / Val / Test | 70% / 15% / 15% (10 220 / 2 190 / 2 190) |
 
 **Категории проблем:** baggage, booking, delay, in-flight, check-in, customer_service, other
 
-**Авто-разметка категорий:** Rule-based система на основе ключевых слов  
-**Авто-разметка критичности:** На основе тональности + наличия "urgent" слов
+**Авто-разметка категорий:** Rule-based система на основе ключевых слов (6 словарей, ~50 ключевых слов)  
+**Авто-разметка критичности:** На основе тональности + наличие urgent-слов (worst, terrible, lawyer, unsafe и др.)
 
-## 5. Результаты экспериментов
+## 5. Метрики качества моделей
 
-### 5.1 Baseline (TF-IDF + LogisticRegression)
+### 5.1 Baseline (TF-IDF + LogisticRegression) — Test Set
 
-| Задача | Accuracy | F1-macro |
-|--------|----------|----------|
-| Sentiment | 1.0000 | 1.0000 |
-| Category | 0.9758 | 0.9718 |
-| Criticality | 0.9995 | 0.9962 |
+**Sentiment Analysis:**
 
-### 5.2 DistilBERT (ожидаемые метрики после обучения в Colab)
+| Класс | Precision | Recall | F1-score | Support |
+|-------|-----------|--------|----------|---------|
+| negative | 1.0000 | 1.0000 | 1.0000 | 960 |
+| neutral | 1.0000 | 1.0000 | 1.0000 | 600 |
+| positive | 1.0000 | 1.0000 | 1.0000 | 630 |
+| **Accuracy** | | | **1.0000** | **2 190** |
+| **Macro avg** | **1.0000** | **1.0000** | **1.0000** | **2 190** |
 
-| Задача | Accuracy (expected) | F1-macro (expected) |
-|--------|---------------------|---------------------|
-| Sentiment | ~0.98 | ~0.97 |
-| Category | ~0.96 | ~0.95 |
-| Criticality | ~0.99 | ~0.98 |
+**Category Classification:**
 
-### 5.3 Примеры предсказаний
+| Класс | Precision | Recall | F1-score | Support |
+|-------|-----------|--------|----------|---------|
+| baggage | 0.9697 | 1.0000 | 0.9846 | 96 |
+| booking | 0.9962 | 1.0000 | 0.9981 | 528 |
+| delay | 0.9885 | 0.9451 | 0.9663 | 273 |
+| in-flight | 0.9941 | 0.9805 | 0.9873 | 514 |
+| check-in | 0.9850 | 0.9292 | 0.9563 | 353 |
+| customer_service | 0.9315 | 0.9855 | 0.9577 | 207 |
+| other | 0.9087 | 1.0000 | 0.9522 | 219 |
+| **Accuracy** | | | **0.9758** | **2 190** |
+| **Macro avg** | **0.9677** | **0.9772** | **0.9718** | **2 190** |
 
-| Текст | Sentiment | Category | Criticality |
-|-------|-----------|----------|-------------|
-| "My flight was delayed 6 hours and nobody helped" | negative (0.99) | delay (0.53) | medium (0.92) |
-| "Great flight! Crew was amazing and food was delicious" | positive (0.97) | in-flight (0.94) | low (0.90) |
-| "Lost my luggage and customer service refused to help" | negative (0.96) | customer_service (0.65) | medium (0.98) |
+**Criticality Classification:**
+
+| Класс | Precision | Recall | F1-score | Support |
+|-------|-----------|--------|----------|---------|
+| low | 1.0000 | 1.0000 | 1.0000 | 1 230 |
+| medium | 1.0000 | 0.9989 | 0.9995 | 914 |
+| high | 0.9400 | 1.0000 | 0.9691 | 46 |
+| **Accuracy** | | | **0.9986** | **2 190** |
+| **Macro avg** | **0.9800** | **0.9996** | **0.9891** | **2 190** |
+
+### 5.2 DistilBERT (fine-tuned) — демонстрационное тестирование
+
+Для оценки BERT на сложных кейсах проведено демонстрационное тестирование на 8 контрольных примерах:
+
+| Текст | Sentiment | Category | Criticality | Результат |
+|-------|-----------|----------|-------------|-----------|
+| "My flight was delayed 5 hours and nobody helped us!" | ✅ negative (98%) | ✅ delay (60%) | ✅ medium (95%) | 3/3 |
+| "Amazing crew, best flight ever! Comfortable seats." | ✅ positive (96%) | ✅ in-flight (87%) | ✅ low (94%) | 3/3 |
+| "Lost my luggage and customer service hung up on me." | ✅ negative (99%) | ⚠️ booking (69%) | ✅ medium (94%) | 2/3 |
+| "Average flight, nothing special but okay for the price." | ✅ neutral (96%) | ⚠️ booking (90%) | ✅ low (94%) | 2/3 |
+| "The flight was fast and there were no delays." | ✅ positive (97%) | ✅ delay (93%) | ✅ low (95%) | 3/3 |
+| "Check-in took 2 hours. Absolutely unacceptable!" | ✅ negative (97%) | ✅ check-in (47%) | ✅ medium (91%) | 3/3 |
+| "Boarding was smooth and crew was very friendly." | ✅ positive (95%) | ✅ in-flight (84%) | ✅ low (96%) | 3/3 |
+| "They cancelled my flight without notice. Had to pay $500!" | ✅ negative (99%) | ✅ booking (93%) | ✅ medium (96%) | 3/3 |
+
+**Общий результат на контрольных примерах: 22/24 (92%)**
+
+### 5.3 Ключевое преимущество BERT над Baseline
+
+| Кейс | Baseline | BERT |
+|------|----------|------|
+| "The flight was fast and there were no delays" | ❌ negative (66%) | ✅ positive (97%) |
+| "I can't say I wasn't impressed. Not bad at all." | ❌ negative | ✅ positive (95%) |
+| "Not a single issue with the airline." | ⚠️ зависит от контекста | ✅ positive (95%) |
+
+BERT корректно обрабатывает отрицания, двойные отрицания и контекстные зависимости, что критически важно для production-развёртывания.
+
+### 5.4 Известные ограничения
+
+- **Сарказм:** "Oh great, another delay. Thanks so much!" → positive вместо negative
+- **Тихий негатив:** мягкие жалобы без сильных слов не всегда определяются как negative
+- **Категория:** при нескольких темах в одном отзыве модель выбирает доминирующую
 
 ## 6. Структура репозитория
 
 ```
-airline-sentiment/
+Airline-Sentiment-Analysis/
 ├── src/
 │   ├── config.py          # Константы, гиперпараметры
 │   ├── data.py            # Загрузка, очистка, авто-разметка
@@ -107,18 +154,24 @@ airline-sentiment/
 │   └── bert_model.py      # DistilBERT multi-task
 ├── scripts/
 │   ├── train.py           # Главный пайплайн обучения
+│   ├── train_bert.sh      # Обучение BERT одной командой
 │   └── generate_data.py   # Генератор датасета
 ├── api/
 │   └── server.py          # FastAPI REST API
 ├── tests/
-│   └── test_pipeline.py   # 18 тестов (pytest)
+│   └── test_pipeline.py   # 19 тестов (pytest)
 ├── notebooks/
-│   └── train_bert_colab.ipynb  # Colab ноутбук для GPU обучения
-├── data/                  # Данные (не в git)
-├── models/                # Модели (не в git)
-├── reports/               # Метрики, отчёты
-├── requirements.txt
-├── Makefile
+│   └── train_bert_colab.ipynb  # Colab ноутбук для GPU
+├── data/                  # Данные (генерируются автоматически)
+├── models/
+│   ├── baseline/          # TF-IDF + LogReg (joblib)
+│   └── bert/              # DistilBERT (PyTorch, Git LFS)
+├── reports/
+│   ├── REPORT.md          # Этот отчёт
+│   └── metrics.json       # Метрики в JSON
+├── setup.sh               # Автоустановка
+├── run.sh                 # Запуск API
+├── requirements.txt       # Зависимости (точные версии)
 ├── .gitignore
 └── README.md
 ```
@@ -126,74 +179,55 @@ airline-sentiment/
 ## 7. Запуск проекта
 
 ```bash
-# Установка (1 команда)
-pip install -r requirements.txt
-
-# Генерация данных + обучение baseline (1 команда)
-python scripts/generate_data.py && python scripts/train.py --baseline-only
-
-# Запуск API
-python -m uvicorn api.server:app --host 0.0.0.0 --port 8000
-
-# Запуск тестов
-python -m pytest tests/ -v
+git clone https://github.com/Sancekez/Airline-Sentiment-Analysis.git
+cd Airline-Sentiment-Analysis
+chmod +x setup.sh && ./setup.sh
+./run.sh    # API → http://localhost:8000/docs
 ```
 
-## 8. API Endpoints
-
-| Method | Endpoint | Описание |
-|--------|----------|----------|
-| GET | /health | Статус сервиса |
-| POST | /predict | Классификация одного текста |
-| POST | /predict/batch | Батч до 50 текстов |
-| GET | /docs | Swagger UI |
-
-## 9. Вычислительные ресурсы
+## 8. Вычислительные ресурсы
 
 | Этап | Ресурс | Время |
 |------|--------|-------|
-| Baseline обучение | CPU (любой) | ~10 секунд |
-| BERT обучение | Google Colab Free (T4 GPU) | ~15 минут |
-| API inference | CPU | <50 мс/запрос |
+| Baseline обучение | CPU | ~10 секунд |
+| BERT обучение | CPU (Intel Core i9-13900H, 20 потоков) | ~2.5 часа |
+| API inference | CPU | <100 мс/запрос |
 
-**Бесплатная инфраструктура:** Google Colab Free Tier (NVIDIA T4, 16 GB VRAM, ограничение ~4 часа/сессию)
+**Инфраструктура:** Локальная рабочая станция
+- **CPU:** 13th Gen Intel® Core™ i9-13900H × 20
+- **ОС:** Ubuntu
+- **Python:** 3.10+
+- **GPU:** Не использовалось (обучение на CPU)
 
-## 10. Тестирование
+## 9. Тестирование
 
-Все 18 тестов проходят успешно:
+19 тестов, все проходят успешно (pytest):
+- 6 тестов предобработки текста (clean_text, negation handling)
+- 6 тестов категоризации (rule-based assignment)
+- 4 теста критичности
+- 3 теста пайплайна данных
 
-```
-tests/test_pipeline.py::TestCleanText::test_removes_mentions PASSED
-tests/test_pipeline.py::TestCleanText::test_removes_urls PASSED
-tests/test_pipeline.py::TestCleanText::test_lowercases PASSED
-tests/test_pipeline.py::TestCleanText::test_preserves_content PASSED
-tests/test_pipeline.py::TestCleanText::test_handles_empty PASSED
-tests/test_pipeline.py::TestCategoryAssignment::test_baggage PASSED
-tests/test_pipeline.py::TestCategoryAssignment::test_delay PASSED
-tests/test_pipeline.py::TestCategoryAssignment::test_checkin PASSED
-tests/test_pipeline.py::TestCategoryAssignment::test_inflight PASSED
-tests/test_pipeline.py::TestCategoryAssignment::test_service PASSED
-tests/test_pipeline.py::TestCategoryAssignment::test_other PASSED
-tests/test_pipeline.py::TestCriticality::test_high_negative PASSED
-tests/test_pipeline.py::TestCriticality::test_medium_negative PASSED
-tests/test_pipeline.py::TestCriticality::test_low_positive PASSED
-tests/test_pipeline.py::TestCriticality::test_low_neutral PASSED
-tests/test_pipeline.py::TestDataPipeline::test_prepare_dataset_runs PASSED
-tests/test_pipeline.py::TestDataPipeline::test_no_empty_texts PASSED
-tests/test_pipeline.py::TestDataPipeline::test_valid_label_ids PASSED
+## 10. Future Work
 
-18 passed ✅
-```
+1. **Интеграция реальных датасетов.** Текущая модель обучена на синтетическом корпусе, что ограничивает обобщающую способность. Планируется интеграция реальных датасетов: Twitter US Airline Sentiment (14 640 твитов с ручной разметкой, Kaggle), Skytrax Airline Reviews (41 000+ отзывов со звёздными рейтингами), Airline Quality Dataset (многоязычные отзывы с детальными категориями). Переход на реальные данные позволит повысить качество категоризации за счёт естественного распределения тем, улучшить обработку сарказма и неоднозначных формулировок, а также обеспечить валидацию метрик на данных, приближённых к production-сценарию.
+
+2. **Мультимодальное расширение: анализ голоса (Speech Emotion Recognition).** Перспективным направлением является добавление модуля распознавания эмоций в речевых сигналах на основе архитектуры Bi-LSTM + Attention с извлечением MFCC-признаков. Это позволит анализировать не только текстовые обращения, но и телефонные звонки пассажиров в контактный центр авиакомпании, обеспечивая комплексную оценку эмоционального состояния клиента.
+
+3. **Распознавание сарказма.** Добавление модуля детекции сарказма на основе контрастивного обучения или fine-tuning на специализированных датасетах (iSarcasm, SemEval-2018 Task 3).
+
+4. **Multi-label категоризация.** Переход на multi-label классификацию с sigmoid-активацией вместо softmax для определения всех релевантных категорий в одном отзыве.
+
+5. **Docker-контейнеризация.** Создание Docker-образа для гарантированной воспроизводимости развёртывания и устранения потенциальных конфликтов библиотек.
 
 ## 11. Выводы
 
 1. Реализован полный NLP-пайплайн для анализа отзывов авиапассажиров с тремя параллельными задачами классификации
-2. Baseline модель (TF-IDF + LogReg) демонстрирует высокое качество: Accuracy 97.6–100% по всем задачам
-3. Подготовлена архитектура DistilBERT с multi-task обучением для повышения качества на реальных данных
-4. Разработан REST API (FastAPI) для интеграции модели в production-среду
-5. Обеспечена воспроизводимость: проект запускается на Ubuntu 20/22/24 + Python 3.10+ двумя командами
-6. 18 unit-тестов покрывают предобработку, разметку и пайплайн данных
+2. Baseline модель (TF-IDF + LogReg): Accuracy 97.6–100%, F1-macro 97.2–100% по всем задачам
+3. DistilBERT с multi-task архитектурой корректно обрабатывает сложные лингвистические конструкции (отрицания, двойные отрицания), где baseline ошибается
+4. REST API (FastAPI) с эндпоинтами /predict и /predict/batch, Swagger UI документацией
+5. Воспроизводимость: проект запускается на Ubuntu 20/22/24 + Python 3.10+ двумя командами
+6. 19 unit-тестов, все зависимости зафиксированы с точными версиями
 
 ---
 
-*Дата составления: апрель 2026 г.*
+*Дата составления: 20 апреля 2026 г.*
